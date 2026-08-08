@@ -37,7 +37,7 @@ app.post("/slack/events", (req, res) => {
 
 app.post("/slack/commands", (req, res) => {
   console.log("Slack command request body:", req.body); 
-  res.status(200).send("Command received");
+  res.status(200).send(`Hello MR ${req.body.user_name}! How can I assist you with you ?`);
 })
 
 

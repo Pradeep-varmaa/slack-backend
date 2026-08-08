@@ -6,11 +6,21 @@ dotenv.config();
 
 const app = express();
 
-app.get("/", (req, res)=>{
+app.use(express.json());
+
+app.use(
+  express.urlencoded({
+    extended: true,
+    verify: (req, res, buf) => {
+      req.rawBody = buf.toString("utf8");
+    },
+  })
+);
+
+app.get("/", (req, res) => {
   res.send("Hello Varma! This is a slack server for testing slack events and commands.");
 })
 
-app.use(express.json());
 
 app.post("/slack/events", (req, res) => {
   console.log("Slack request body:", req.body);
@@ -22,9 +32,13 @@ app.post("/slack/events", (req, res) => {
     });
   }
 
-  // Normal Slack events
   return res.status(200).send("Event received");
 });
+
+app.post("/slack/commands", (req, res) => {
+  console.log("Slack command request body:", req.body); 
+  res.status(200).send("Command received");
+})
 
 
 app.listen(process.env.PORT_NO, () => {

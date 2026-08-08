@@ -10,22 +10,21 @@ app.get("/", (req, res)=>{
   res.send("Hello Varma! This is a slack server for testing slack events and commands.");
 })
 
-app.post('/slack/events', (req, res) => {
-  const { type, challenge } = req.body;
+app.use(express.json());
 
-  // Slack URL Verification
-  if (type === 'url_verification') {
+app.post("/slack/events", (req, res) => {
+  console.log("Slack request body:", req.body);
+
+  const { type, challenge } = req.body || {};
+  if (type === "url_verification") {
     return res.status(200).json({
-      challenge: challenge
+      challenge: challenge,
     });
   }
 
   // Normal Slack events
-  console.log('Slack Event:', req.body);
-
-  return res.status(200).send('Event received');
+  return res.status(200).send("Event received");
 });
-
 
 
 app.listen(process.env.PORT_NO, () => {

@@ -34,22 +34,20 @@ app.post("/slack/events", (req, res) => {
 
   if (type === "event_callback") {
     const { event } = req.body;
-    console.log("Event type:", event.type);
 
     if (event.type === "message") {
       console.log("User:", event.user);
       console.log("Message:", event.text);
-      res.send("Message event received").status(200);
+      return res.send("Message event received").status(200);
     }
   }
 
-  return res.status(200).send("Event received");
 });
 
 app.post("/slack/commands", (req, res) => {
   console.log("Slack command request body:", req.body);
   if (req.body.command === '/assisstant') {
-    res.status(200).send(`Hello Mr.${req.body.user_name}! How can I assist you with you ?`);
+    res.status(200).send(`Hello! This is Jimmy. How can I assist you with you ?`);
   }
   if (req.body.command === '/bot') {
 

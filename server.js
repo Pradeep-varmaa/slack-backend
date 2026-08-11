@@ -5,7 +5,7 @@ const pool = require('./lib/db');
 const portfoliocount = require('./middleware/portfoliocount')
 const { understandQuery } = require('./middleware/aibot');
 const { WebClient } = require('@slack/web-api');
-const GenerateAiAnswers  = require('./middleware/generateaianswers');
+const GenerateAiAnswers = require('./middleware/generateaianswers');
 
 const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
@@ -28,37 +28,77 @@ app.get("/", (req, res) => {
 
 
 app.post("/slack/events", async (req, res) => {
-  console.log("Slack request body:", req.body);
 
   try {
-    const { type, challenge } = req.body || {};
+
+    // Slack retry detection
+    const retryNum = req.headers["x-slack-retry-num"];
+
+    if (retryNum) {
+
+      console.log(
+        "Ignoring Slack retry:",
+        retryNum,
+        req.headers["x-slack-retry-reason"]
+      );
+
+      return res.sendStatus(200);
+    }
+
+    const { type, event } = req.body;
 
     if (type === "url_verification") {
-      return res.status(200).json({
-        challenge: challenge,
+      return res.status(200).send(req.body.challenge);
+    }
+
+    if (type !== "event_callback") {
+      return res.sendStatus(200);
+    }
+
+    if (!event) {
+      return res.sendStatus(200);
+    }
+
+    if (event.type !== "message") {
+      return res.sendStatus(200);
+    }
+
+    if (event.bot_id) {
+      return res.sendStatus(200);
+    }
+
+    res.sendStatus(200);
+
+    const userMessage = event.text;
+    const channelId = event.channel;
+
+    console.log("User:", userMessage);
+
+    try {
+
+      const aianswer =
+        await GenerateAiAnswers(userMessage);
+
+      console.log("AI:", aianswer);
+
+      await slack.chat.postMessage({
+        channel: channelId,
+        text: aianswer
       });
+
+    } catch (error) {
+
+      console.error(
+        "AI/Slack error:",
+        error
+      );
     }
 
-    if (type === "event_callback") {
-      const { event } = req.body;
-      if (event.type !== "message" || event.bot_id) {
-        return;
-      }
+  } catch (error) {
 
-      if (event.type === "message") {
-        const userMessage = event.text;
-        const channelId = event.channel;
+    console.error("Slack event error:", error);
 
-        const aianswer = await GenerateAiAnswers(userMessage);
-
-         const result = await slack.chat.postMessage({
-          channel: channelId,
-          text: aianswer,
-         })
-      }
-    }
-  } catch (err) {
-    console.error("Error processing Slack event:", err);
+    // Don't attempt another response if already sent
   }
 });
 
@@ -76,12 +116,12 @@ app.post("/slack/commands", async (req, res) => {
       console.log("Intent classification result:", result);
       res.status(200).send(`Intent: ${result.intent}, Period: ${result.period}`);
     } catch (error) {
-        console.error("Error understanding query:", error);
-        res.status(500).send("Error processing your request.");
-      }
+      console.error("Error understanding query:", error);
+      res.status(500).send("Error processing your request.");
+    }
   }
 
-  if(req.body.command ==='/search'){
+  if (req.body.command === '/search') {
     const userMessage = req.body.text;
 
     const aianswer = await GenerateAiAnswers(userMessage);

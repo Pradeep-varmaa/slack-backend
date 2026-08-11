@@ -63,34 +63,34 @@ app.post("/slack/events", async (req, res) => {
 });
 
 
-app.post("/slack/commands", (req, res) => {
+app.post("/slack/commands", async (req, res) => {
   console.log("Slack command request body:", req.body);
   if (req.body.command === '/assisstant') {
     res.status(200).send(`Hello! This is Jimmy. How can I assist you with you ?`);
   }
-  if (req.body.command === '/bot') {
 
+  if (req.body.command === '/bot') {
     const userMessage = req.body.text;
-    understandQuery(userMessage)
-      .then((result) => {
-        console.log("Intent classification result:", result);
-        res.status(200).send(`Intent: ${result.intent}, Period: ${result.period}`);
-      })
-      .catch((error) => {
+    try {
+      const result = await understandQuery(userMessage);
+      console.log("Intent classification result:", result);
+      res.status(200).send(`Intent: ${result.intent}, Period: ${result.period}`);
+    } catch (error) {
         console.error("Error understanding query:", error);
         res.status(500).send("Error processing your request.");
-      })
+      }
+  }
+
+  if(req.body.command ==='/search'){
+    const userMessage = req.body.text;
+
+    const aianswer = await GenerateAiAnswers(userMessage);
+    res.status(200).send(aianswer);
   }
 
 })
 
 
-app.get('/portfoliocount', (req, res) => {
-  const count = portfoliocount()
-
-  res.send(count).status(200)
-
-})
 
 app.listen(process.env.PORT_NO, () => {
   console.log(`Server is running on port ${process.env.PORT_NO}`);

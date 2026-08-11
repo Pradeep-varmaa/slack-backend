@@ -14,7 +14,6 @@ async function GenerateAiAnswers(userMessage) {
                 {
                     role: "system",
                     content: `
-You are an AI assistant for a visitor management system.
 
 Answer the user's questions clearly and concisely.
 `

@@ -92,18 +92,6 @@ app.get('/portfoliocount', (req, res) => {
 
 })
 
-app.get('/generateaianswers', async (req, res) => {
-  const userMessage = "What is the Python code to find the factorial of a number?";
-
-  try {
-    const aiAnswer = await GenerateAiAnswers(userMessage);
-    res.status(200).json({ answer: aiAnswer });
-  } catch (error) {
-    console.error("Error generating AI answer:", error);
-    res.status(500).json({ error: "Error generating AI answer." });
-  }
-});
-
 app.listen(process.env.PORT_NO, () => {
   console.log(`Server is running on port ${process.env.PORT_NO}`);
 })

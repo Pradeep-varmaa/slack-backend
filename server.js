@@ -9,6 +9,8 @@ const GenerateAiAnswers = require('./middleware/generateaianswers');
 
 const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
+const processedEvents = new Set();
+
 const app = express();
 
 app.use(express.json());
@@ -41,36 +43,85 @@ app.post("/slack/events", async (req, res) => {
 
     if (type === "event_callback") {
 
-      const { event } = req.body;
+    const { event, event_id } = req.body;
 
-      if (event.type !== "message" || event.bot_id) {
+    if (processedEvents.has(event_id)) {
+        console.log("Duplicate event ignored:", event_id);
         return res.sendStatus(200);
-      }
+    }
 
-      res.sendStatus(200);
+    processedEvents.add(event_id);
 
-      try {
+    if (!event || event.type !== "message") {
+        return res.sendStatus(200);
+    }
+
+    if (event.bot_id || event.subtype === "bot_message") {
+        return res.sendStatus(200);
+    }
+
+    res.sendStatus(200);
+
+    try {
 
         const userMessage = event.text;
         const channelId = event.channel;
 
         console.log("User message:", userMessage);
+        console.log("Event ID:", event_id);
 
         const aianswer = await GenerateAiAnswers(userMessage);
 
         console.log("AI answer:", aianswer);
 
         await slack.chat.postMessage({
-          channel: channelId,
-          text: aianswer,
+            channel: channelId,
+            text: aianswer,
         });
 
-      } catch (error) {
-        console.error("Error processing Slack message:", error);
-      }
+    } catch (error) {
 
-      return;
+        console.error("AI/Slack error:", error);
+
     }
+
+    return;
+}
+
+    // if (type === "event_callback") {
+
+    //   console.log("Received Slack event:", req.body.event);
+
+    //   const { event } = req.body;
+
+    //   if (event.type !== "message" || event.bot_id) {
+    //     return res.sendStatus(200);
+    //   }
+
+    //   res.sendStatus(200);
+
+    //   try {
+
+    //     const userMessage = event.text;
+    //     const channelId = event.channel;
+
+    //     console.log("User message:", userMessage);
+
+    //     const aianswer = await GenerateAiAnswers(userMessage);
+
+    //     console.log("AI answer:", aianswer);
+
+    //     await slack.chat.postMessage({
+    //       channel: channelId,
+    //       text: aianswer,
+    //     });
+
+    //   } catch (error) {
+    //     console.error("Error processing Slack message:", error);
+    //   }
+
+    //   return;
+    // }
   } catch (err) {
     console.error("Error processing Slack event:", err);
   }

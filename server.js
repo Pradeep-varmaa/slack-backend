@@ -96,7 +96,7 @@ app.post("/slack/commands", async (req, res) => {
     }
   }
 
-  if (req.body.command === '/search') {
+  if (req.body.command === '/websearch') {
     const userMessage = req.body.text;
 
     const aianswer = await GenerateAiAnswers(userMessage);

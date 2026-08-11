@@ -5,7 +5,7 @@ const pool = require('./lib/db');
 const portfoliocount = require('./middleware/portfoliocount')
 const { understandQuery } = require('./middleware/aibot');
 const { WebClient } = require('@slack/web-api');
-const GenerateAiAnswers  = require('./middleware/generateaianswers');
+const GenerateAiAnswers = require('./middleware/generateaianswers');
 
 const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
@@ -40,22 +40,36 @@ app.post("/slack/events", async (req, res) => {
     }
 
     if (type === "event_callback") {
+
       const { event } = req.body;
+
       if (event.type !== "message" || event.bot_id) {
-        return;
+        return res.sendStatus(200);
       }
 
-      if (event.type === "message") {
+      res.sendStatus(200);
+
+      try {
+
         const userMessage = event.text;
         const channelId = event.channel;
 
+        console.log("User message:", userMessage);
+
         const aianswer = await GenerateAiAnswers(userMessage);
 
-         const result = await slack.chat.postMessage({
+        console.log("AI answer:", aianswer);
+
+        await slack.chat.postMessage({
           channel: channelId,
           text: aianswer,
-         })
+        });
+
+      } catch (error) {
+        console.error("Error processing Slack message:", error);
       }
+
+      return;
     }
   } catch (err) {
     console.error("Error processing Slack event:", err);
@@ -75,13 +89,14 @@ app.post("/slack/commands", async (req, res) => {
       const result = await understandQuery(userMessage);
       console.log("Intent classification result:", result);
       res.status(200).send(`Intent: ${result.intent}, Period: ${result.period}`);
-    } catch (error) {
-        console.error("Error understanding query:", error);
-        res.status(500).send("Error processing your request.");
-      }
+    } 
+    catch (error) {
+      console.error("Error understanding query:", error);
+      res.status(500).send("Error processing your request.");
+    }
   }
 
-  if(req.body.command ==='/search'){
+  if (req.body.command === '/search') {
     const userMessage = req.body.text;
 
     const aianswer = await GenerateAiAnswers(userMessage);
@@ -89,7 +104,6 @@ app.post("/slack/commands", async (req, res) => {
   }
 
 })
-
 
 
 app.listen(process.env.PORT_NO, () => {

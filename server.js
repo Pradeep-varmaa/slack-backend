@@ -40,35 +40,23 @@ app.post("/slack/events", async (req, res) => {
     }
 
     if (type === "event_callback") {
+      const { event } = req.body;
+      if (event.type !== "message" || event.bot_id) {
+        return;
+      }
 
-    const { event } = req.body;
-
-    if (event.type !== "message" || event.bot_id) {
-        return res.sendStatus(200);
-    }
-
-    res.sendStatus(200);
-
-    const userMessage = event.text;
-    const channelId = event.channel;
-
-    try {
+      if (event.type === "message") {
+        const userMessage = event.text;
+        const channelId = event.channel;
 
         const aianswer = await GenerateAiAnswers(userMessage);
 
-        await slack.chat.postMessage({
-            channel: channelId,
-            text: aianswer
-        });
-
-    } catch (error) {
-
-        console.error("AI/Slack error:", error);
-
+         const result = await slack.chat.postMessage({
+          channel: channelId,
+          text: aianswer,
+         })
+      }
     }
-
-    return;
-}
   } catch (err) {
     console.error("Error processing Slack event:", err);
   }

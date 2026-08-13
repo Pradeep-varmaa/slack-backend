@@ -130,7 +130,7 @@ app.post("/slack/commands", async (req, res) => {
       await fetch(responseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: `Reminder was initiated successfully on ${converted_time}` }) });
     } catch (error) {
       console.error("Reminder error:", error);
-      await fetch(responseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Something went wrong! Try again later.' }) });
+      await fetch(responseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Something went wrong! Try again later.',error }) });
     }
   }
 })

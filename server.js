@@ -2,10 +2,13 @@ const express = require('express');
 const dotenv = require('dotenv');
 dotenv.config();
 const pool = require('./lib/db');
-const portfoliocount = require('./middleware/portfoliocount')
-const { understandQuery } = require('./middleware/aibot');
+const portfoliocount = require('./functions/portfoliocount')
+const { understandQuery } = require('./functions/aibot');
 const { WebClient } = require('@slack/web-api');
-const GenerateAiAnswers = require('./middleware/generateaianswers');
+const GenerateAiAnswers = require('./functions/generateaianswers');
+const ExtractRemainderdetails = require('./functions/remainderbot');
+const { GetRemaindersData, InsertRemainderdata, UpdateRemainderstatus } = require('./functions/remainderdbfunctions');
+const {sendEmail} = require('./lib/sentmail')
 
 const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
@@ -25,7 +28,7 @@ app.use(
 );
 
 app.get("/", (req, res) => {
-  res.send("Hello Varma! This is a slack server for testing slack events and commands.");
+  res.send("Welcome to the Slack Backend Server!");
 })
 
 
@@ -43,85 +46,40 @@ app.post("/slack/events", async (req, res) => {
 
     if (type === "event_callback") {
 
-    const { event, event_id } = req.body;
+      console.log("Received Slack event:", req.body.event);
 
-    if (processedEvents.has(event_id)) {
+      const { event, event_id } = req.body;
+      if (processedEvents.has(event_id)) {
         console.log("Duplicate event ignored:", event_id);
         return res.sendStatus(200);
-    }
+      }
 
-    processedEvents.add(event_id);
+      processedEvents.add(event_id);
 
-    if (!event || event.type !== "message") {
+      if (event.type !== "message" || event.bot_id) {
         return res.sendStatus(200);
-    }
+      }
 
-    if (event.bot_id || event.subtype === "bot_message") {
-        return res.sendStatus(200);
-    }
+      res.sendStatus(200);
 
-    res.sendStatus(200);
-
-    try {
+      try {
 
         const userMessage = event.text;
         const channelId = event.channel;
 
-        console.log("User message:", userMessage);
-        console.log("Event ID:", event_id);
-
         const aianswer = await GenerateAiAnswers(userMessage);
 
-        console.log("AI answer:", aianswer);
-
         await slack.chat.postMessage({
-            channel: channelId,
-            text: aianswer,
+          channel: channelId,
+          text: aianswer,
         });
 
-    } catch (error) {
+      } catch (error) {
+        console.error("Error processing Slack message:", error);
+      }
 
-        console.error("AI/Slack error:", error);
-
+      return;
     }
-
-    return;
-}
-
-    // if (type === "event_callback") {
-
-    //   console.log("Received Slack event:", req.body.event);
-
-    //   const { event } = req.body;
-
-    //   if (event.type !== "message" || event.bot_id) {
-    //     return res.sendStatus(200);
-    //   }
-
-    //   res.sendStatus(200);
-
-    //   try {
-
-    //     const userMessage = event.text;
-    //     const channelId = event.channel;
-
-    //     console.log("User message:", userMessage);
-
-    //     const aianswer = await GenerateAiAnswers(userMessage);
-
-    //     console.log("AI answer:", aianswer);
-
-    //     await slack.chat.postMessage({
-    //       channel: channelId,
-    //       text: aianswer,
-    //     });
-
-    //   } catch (error) {
-    //     console.error("Error processing Slack message:", error);
-    //   }
-
-    //   return;
-    // }
   } catch (err) {
     console.error("Error processing Slack event:", err);
   }
@@ -129,18 +87,16 @@ app.post("/slack/events", async (req, res) => {
 
 
 app.post("/slack/commands", async (req, res) => {
-  console.log("Slack command request body:", req.body);
   if (req.body.command === '/assisstant') {
     res.status(200).send(`Hello! This is Jimmy. How can I assist you with you ?`);
   }
 
-  if (req.body.command === '/bot') {
+  if (req.body.command === '/portfolio') {
     const userMessage = req.body.text;
     try {
       const result = await understandQuery(userMessage);
-      console.log("Intent classification result:", result);
       res.status(200).send(`Intent: ${result.intent}, Period: ${result.period}`);
-    } 
+    }
     catch (error) {
       console.error("Error understanding query:", error);
       res.status(500).send("Error processing your request.");
@@ -153,7 +109,44 @@ app.post("/slack/commands", async (req, res) => {
     const aianswer = await GenerateAiAnswers(userMessage);
     res.status(200).send(aianswer);
   }
+  if (req.body.command === '/remainder') {
+    const userMessage = req.body.text;
+    const responseUrl = req.body.response_url;
+    res.status(200).send();
+    try {
+      const result = await ExtractRemainderdetails(userMessage);
+      const jsondata = typeof result === 'string' ? JSON.parse(result) : result;
+      console.log("Remainder extraction result:", jsondata);
+      if (!jsondata.is_reminder) {
+        await fetch(responseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Please provide a valid reminder request.' }) });
+        return;
+      }
+      const insertResult = await InsertRemainderdata(jsondata.reminder_message, jsondata.reminder_time);
+      if (!insertResult) {
+        await fetch(responseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Something went wrong while creating the reminder.' }) });
+        return;
+      }
+      const converted_time = new Date(jsondata.reminder_time).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true, hour: 'numeric', minute: 'numeric', day: 'numeric', month: 'short', year: 'numeric' });
+      await fetch(responseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: `Reminder was initiated successfully on ${converted_time}` }) });
+    } catch (error) {
+      console.error("Reminder error:", error);
+      await fetch(responseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Something went wrong! Try again later.' }) });
+    }
+  }
+})
 
+app.get("/slack/checkremainders", async (req, res) => {
+  const remainder = await GetRemaindersData();
+
+  for (const data of remainder){
+    const mail = await sendEmail(data.task, data.sent_at);
+
+    console.log(mail.response)
+
+    const update = await UpdateRemainderstatus(data.id,"SENT")
+  }
+   
+  res.status(200).send("remainder");
 })
 
 

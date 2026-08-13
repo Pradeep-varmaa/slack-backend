@@ -8,7 +8,7 @@ const { WebClient } = require('@slack/web-api');
 const GenerateAiAnswers = require('./functions/generateaianswers');
 const ExtractRemainderdetails = require('./functions/remainderbot');
 const { GetRemaindersData, InsertRemainderdata, UpdateRemainderstatus } = require('./functions/remainderdbfunctions');
-const {sendEmail} = require('./lib/sentmail')
+const { sendEmail } = require('./lib/sentmail')
 
 const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
@@ -138,15 +138,25 @@ app.post("/slack/commands", async (req, res) => {
 app.get("/slack/checkremainders", async (req, res) => {
   const remainder = await GetRemaindersData();
 
-  for (const data of remainder){
-    const mail = await sendEmail(data.task, data.sent_at);
+  console.log("Remainders to be sent:", remainder);
 
-    console.log(mail.response)
+  let mail_sent = 0
 
-    const update = await UpdateRemainderstatus(data.id,"SENT")
+  for (const data of remainder) {
+    try {
+      const mail = await sendEmail(data.task, data.sent_at);
+
+      if (mail) {
+        mail_sent++
+
+        const update = await UpdateRemainderstatus(data.id, "SENT")
+      }
+
+    } catch (err) {
+      console.error("Error while sending email for remainder id:", data.id, err);
+    }
   }
-   
-  res.status(200).send("remainder");
+    res.status(200).send(`Remainders checked. Emails sent: ${mail_sent}`);
 })
 
 

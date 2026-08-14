@@ -1,6 +1,5 @@
 const pool = require('../lib/db');
 
-
 async function GetRemaindersData(){
     try{
         const query = await pool.query(`select * from slack_remainders where sent_at>=now() and status = 'PENDING'`);

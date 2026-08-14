@@ -111,34 +111,24 @@ app.post("/slack/commands", async (req, res) => {
   }
   if (req.body.command === '/remainder') {
     const userMessage = req.body.text;
-    const responseUrl = req.body.response_url;
-    res.status(200).send();
-    try {
-      const result = await ExtractRemainderdetails(userMessage);
-      const jsondata = typeof result === 'string' ? JSON.parse(result) : result;
-      console.log("Remainder extraction result:", jsondata);
-      if (!jsondata.is_reminder) {
-        await fetch(responseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Please provide a valid reminder request.' }) });
-        return;
-      }
-      const insertResult = await InsertRemainderdata(jsondata.reminder_message, jsondata.reminder_time);
-      if (!insertResult) {
-        await fetch(responseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Something went wrong while creating the reminder.' }) });
-        return;
-      }
-      const converted_time = new Date(jsondata.reminder_time).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true, hour: 'numeric', minute: 'numeric', day: 'numeric', month: 'short', year: 'numeric' });
-      await fetch(responseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: `Reminder was initiated successfully on ${converted_time}` }) });
-    } catch (error) {
-      console.error("Reminder error:", error);
-      await fetch(responseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Something went wrong! Try again later.' }) });
+    const result = await ExtractRemainderdetails(userMessage);
+    const jsondata = JSON.parse(result);
+    console.log("Remainder extraction result:", typeof jsondata);
+
+    const insertResult = await InsertRemainderdata(task=jsondata.reminder_message, sent=jsondata.reminder_time);
+
+    const converted_time = new Date(jsondata.reminder_time).toLocaleString('en-US', { timeZone: 'UTC' },{hour12: true, hour: 'numeric', minute: 'numeric',  day: 'numeric'});
+    if(insertResult){
+    res.status(200).send(`Remainder was initiated successfully on ${converted_time}`);
+    }
+    else{
+      res.status(500).send(`Something went wrong! Try again later.`);
     }
   }
 })
 
 app.get("/slack/checkremainders", async (req, res) => {
   const remainder = await GetRemaindersData();
-
-  console.log("Remainders to be sent:", remainder);
 
   let mail_sent = 0
 

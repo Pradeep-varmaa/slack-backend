@@ -2,7 +2,7 @@ const pool = require('../lib/db');
 
 async function GetRemaindersData(){
     try{
-        const query = await pool.query(`select * from slack_remainders where sent_at<=now() and status = 'PENDING'`);
+        const query = await pool.query(`select * from slack_remainders where sent_at<=NOW() AT TIME ZONE 'Asia/Kolkata' and status = 'PENDING'`);
 
         const result = query.rows;
         return result;

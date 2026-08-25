@@ -7,7 +7,7 @@ const groq = new Groq({
 async function GenerateAiAnswers(userMessage) {
     try {
         const completion = await groq.chat.completions.create({
-            model: "llama-3.3-70b-versatile",
+            model: "openai/gpt-oss-20b",
             temperature: 0.2,
 
             messages: [
@@ -32,5 +32,24 @@ Answer the user's questions clearly and concisely.
         throw err;
     }
 }
+
+
+async function checkModels() {
+    try {
+        const models = await groq.models.list();
+
+        console.log(
+            models.data.map(model => ({
+                id: model.id,
+                active: model.active
+            }))
+        );
+
+    } catch (error) {
+        console.error("Unable to retrieve Groq models:", error);
+    }
+}
+
+// checkModels(); 
 
 module.exports = GenerateAiAnswers;

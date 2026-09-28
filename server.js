@@ -95,7 +95,10 @@ app.post("/slack/commands", async (req, res) => {
     const userMessage = req.body.text;
     try {
       const result = await understandQuery(userMessage);
-      res.status(200).send(`Intent: ${result.intent}, Period: ${result.period}`);
+
+      const portfolioCountResult = await portfoliocount(result);
+      const rephrasedAnswer = await ReframeAnswer(`The visitor count for ${result.period} is ${portfolioCountResult}.`);
+      res.status(200).send(rephrasedAnswer);
     }
     catch (error) {
       console.error("Error understanding query:", error);

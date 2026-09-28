@@ -9,6 +9,7 @@ const GenerateAiAnswers = require('./functions/generateaianswers');
 const ExtractRemainderdetails = require('./functions/remainderbot');
 const { GetRemaindersData, InsertRemainderdata, UpdateRemainderstatus } = require('./functions/remainderdbfunctions');
 const { sendEmail } = require('./lib/sentmail')
+const ReframeAnswer = require('./functions/frameanswer');
 
 const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
@@ -91,21 +92,33 @@ app.post("/slack/commands", async (req, res) => {
     res.status(200).send(`Hello! This is Jimmy. How can I assist you with you ?`);
   }
 
-  if (req.body.command === '/portfolio') {
-    const userMessage = req.body.text;
-    try {
-      const result = await understandQuery(userMessage);
+if (req.body.command === '/portfolio') {
+  const userMessage = req.body.text;
+  const responseUrl = req.body.response_url;
 
-      const portfolioCountResult = await portfoliocount(result);
-      const rephrasedAnswer = await ReframeAnswer(`The visitor count for ${result.period} is ${portfolioCountResult}.`);
-      res.status(200).send(rephrasedAnswer);
-    }
-    catch (error) {
-      console.error("Error understanding query:", error);
-      res.status(500).send("Error processing your request.");
-    }
+  // 1. Acknowledge within 3 seconds so Slack doesn't show operation_timeout
+  res.status(200).json({
+    response_type: 'ephemeral',
+    text: '⏳ Checking...',
+  });
+
+  // 2. Do the slow work after responding
+  try {
+    const result = await understandQuery(userMessage);
+
+    const rows = await portfoliocount(result);
+    console.log("Portfolio count result:", rows);
+
+    const rephrasedAnswer = await ReframeAnswer(userMessage, rows);
+    console.log("Rephrased answer:", rephrasedAnswer);
+
+    await postToSlack(responseUrl, rephrasedAnswer);
+  } catch (error) {
+    console.error("Error understanding query:", error);
+    await postToSlack(responseUrl, "Sorry, something went wrong processing your request.");
   }
-
+  return;
+}
   if (req.body.command === '/websearch') {
     const userMessage = req.body.text;
 
@@ -118,13 +131,13 @@ app.post("/slack/commands", async (req, res) => {
     const jsondata = JSON.parse(result);
     console.log("Remainder extraction result:", typeof jsondata);
 
-    const insertResult = await InsertRemainderdata(task=jsondata.reminder_message, sent=jsondata.reminder_time);
+    const insertResult = await InsertRemainderdata(task = jsondata.reminder_message, sent = jsondata.reminder_time);
 
-    const converted_time = new Date(jsondata.reminder_time).toLocaleString('en-US', { timeZone: 'UTC' },{hour12: true, hour: 'numeric', minute: 'numeric',  day: 'numeric'});
-    if(insertResult){
-    res.status(200).send(`Remainder was initiated successfully on ${converted_time}`);
+    const converted_time = new Date(jsondata.reminder_time).toLocaleString('en-US', { timeZone: 'UTC' }, { hour12: true, hour: 'numeric', minute: 'numeric', day: 'numeric' });
+    if (insertResult) {
+      res.status(200).send(`Remainder was initiated successfully on ${converted_time}`);
     }
-    else{
+    else {
       res.status(500).send(`Something went wrong! Try again later.`);
     }
   }
@@ -149,10 +162,30 @@ app.get("/slack/checkremainders", async (req, res) => {
       console.error("Error while sending email for remainder id:", data.id, err);
     }
   }
-    res.status(200).send(`Remainders checked. Emails sent: ${mail_sent}`);
+  res.status(200).send(`Remainders checked. Emails sent: ${mail_sent}`);
 })
 
 
 app.listen(process.env.PORT_NO, () => {
   console.log(`Server is running on port ${process.env.PORT_NO}`);
 })
+
+
+
+
+async function postToSlack(responseUrl, text) {
+  try {
+    const r = await fetch(responseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        response_type: 'in_channel', // use 'ephemeral' if only the requester should see it
+        replace_original: true,      // replaces the "Checking..." message
+        text,
+      }),
+    });
+    if (!r.ok) console.error('Slack response_url failed:', r.status, await r.text());
+  } catch (err) {
+    console.error('postToSlack error:', err);
+  }
+}

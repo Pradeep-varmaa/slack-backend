@@ -227,9 +227,7 @@ async function understandQuery(userMessage) {
     model: "openai/gpt-oss-20b",
 
     messages: [
-      {
         systemPrompt,
-      },
       {
         role: "user",
         content: userMessage,

@@ -92,61 +92,33 @@ app.post("/slack/commands", async (req, res) => {
     res.status(200).send(`Hello! This is Jimmy. How can I assist you with you ?`);
   }
 
-const withTimeout = (promise, ms) =>
-  Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('Timed out')), ms)),
-  ]);
-
-async function postToSlack(responseUrl, text) {
-  try {
-    const r = await fetch(responseUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        response_type: 'in_channel', // visible to the channel
-        text,
-      }),
-    });
-    console.log('Slack response_url reply:', r.status, await r.text());
-  } catch (err) {
-    console.error('postToSlack error:', err);
-  }
-}
-
-// inside your route handler
 if (req.body.command === '/portfolio') {
   const userMessage = req.body.text;
   const responseUrl = req.body.response_url;
 
-  // 1. Empty 200 acknowledges Slack without posting a "Checking..." message
-  res.status(200).send();
-  console.log('1. ack sent');
+  // 1. Acknowledge within 3 seconds so Slack doesn't show operation_timeout
+  res.status(200).json({
+    response_type: 'ephemeral',
+    text: '⏳ Checking...',
+  });
 
+  // 2. Do the slow work after responding
   try {
-    const answer = await withTimeout(
-      (async () => {
-        const result = await understandQuery(userMessage);
-        console.log('2. understood:', result);
+    const result = await understandQuery(userMessage);
 
-        const rows = await portfoliocount(result);
-        console.log('3. rows:', rows);
+    const rows = await portfoliocount(result);
+    console.log("Portfolio count result:", rows);
 
-        return ReframeAnswer(userMessage, rows);
-      })(),
-      20000
-    );
+    const rephrasedAnswer = await ReframeAnswer(userMessage, rows);
+    console.log("Rephrased answer:", rephrasedAnswer);
 
-    console.log('4. answer:', answer);
-    await postToSlack(responseUrl, answer);
-    console.log('5. posted');
+    await postToSlack(responseUrl, rephrasedAnswer);
   } catch (error) {
-    console.error('Error:', error);
-    await postToSlack(responseUrl, 'Sorry, something went wrong. Please try again.');
+    console.error("Error understanding query:", error);
+    await postToSlack(responseUrl, "Sorry, something went wrong processing your request.");
   }
   return;
 }
-
   if (req.body.command === '/websearch') {
     const userMessage = req.body.text;
 
@@ -197,3 +169,23 @@ app.get("/slack/checkremainders", async (req, res) => {
 app.listen(process.env.PORT_NO, () => {
   console.log(`Server is running on port ${process.env.PORT_NO}`);
 })
+
+
+
+
+async function postToSlack(responseUrl, text) {
+  try {
+    const r = await fetch(responseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        response_type: 'in_channel', // use 'ephemeral' if only the requester should see it
+        replace_original: true,      // replaces the "Checking..." message
+        text,
+      }),
+    });
+    if (!r.ok) console.error('Slack response_url failed:', r.status, await r.text());
+  } catch (err) {
+    console.error('postToSlack error:', err);
+  }
+}

@@ -31,7 +31,7 @@ async function PortfolioCount(systemQuery) {
   }
 
   const { rows } = await pool.query(sql);
-  return rows; // <-- this return is what was missing
+  return rows; 
 }
 
 module.exports = PortfolioCount;

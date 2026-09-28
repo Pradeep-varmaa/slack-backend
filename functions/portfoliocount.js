@@ -22,16 +22,13 @@
 
 const pool = require('../lib/db');
 
-async function PortfolioCount(systemQuery) {
-  const sql = (systemQuery && systemQuery.sql || '').trim().replace(/;\s*$/, '');
+async function PortfolioCount() {
 
-  // Safety: only a single SELECT statement
-  if (!/^select\b/i.test(sql) || sql.includes(';')) {
-    throw new Error('Only a single SELECT query is allowed');
-  }
+    const query = await pool.query("select count(*) from portfolio_visits")
+    const result = await query.rows
 
-  const { rows } = await pool.query(sql);
-  return rows; // <-- this return is what was missing
+    console.log(result)
+
 }
 
 module.exports = PortfolioCount;

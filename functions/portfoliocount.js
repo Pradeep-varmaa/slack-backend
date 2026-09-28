@@ -1,12 +1,15 @@
-const pool = require('../lib/db')
+const pool = require('../lib/db');
 
-async function PortfolioCount() {
+async function PortfolioCount(sql) {
+  const cleaned = (sql || '').trim().replace(/;\s*$/, '');
 
-    const query = await pool.query("select count(*) from portfolio_visits")
-    const result = await query.rows
+  if (!/^select\b/i.test(cleaned) || cleaned.includes(';')) {
+    throw new Error('Only a single SELECT query is allowed');
+  }
 
-    console.log(result)
-
+  const { rows } = await pool.query(cleaned);
+  console.log(rows[0]);
+  return rows; 
 }
 
-module.exports = PortfolioCount
+module.exports = { PortfolioCount };

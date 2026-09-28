@@ -10,6 +10,7 @@ const ExtractRemainderdetails = require('./functions/remainderbot');
 const { GetRemaindersData, InsertRemainderdata, UpdateRemainderstatus } = require('./functions/remainderdbfunctions');
 const { sendEmail } = require('./lib/sentmail')
 const ReframeAnswer = require('./functions/frameanswer');
+const { waitUntil } = require('@vercel/functions');
 
 const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
@@ -87,10 +88,6 @@ app.post("/slack/events", async (req, res) => {
 });
 
 
-app.post("/slack/commands", async (req, res) => {
-  if (req.body.command === '/assisstant') {
-    res.status(200).send(`Hello! This is Jimmy. How can I assist you with you ?`);
-  }
 
 const withTimeout = (promise, ms) =>
   Promise.race([
@@ -103,10 +100,7 @@ async function postToSlack(responseUrl, text) {
     const r = await fetch(responseUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        response_type: 'in_channel', // visible to the channel
-        text,
-      }),
+      body: JSON.stringify({ response_type: 'in_channel', text }),
     });
     console.log('Slack response_url reply:', r.status, await r.text());
   } catch (err) {
@@ -114,29 +108,18 @@ async function postToSlack(responseUrl, text) {
   }
 }
 
-// inside your route handler
-if (req.body.command === '/portfolio') {
-  const userMessage = req.body.text;
-  const responseUrl = req.body.response_url;
-
-  // 1. Empty 200 acknowledges Slack without posting a "Checking..." message
-  res.status(200).send();
-  console.log('1. ack sent');
-
+async function handlePortfolio(userMessage, responseUrl) {
   try {
     const answer = await withTimeout(
       (async () => {
         const result = await understandQuery(userMessage);
         console.log('2. understood:', result);
-
         const rows = await portfoliocount(result);
         console.log('3. rows:', rows);
-
         return ReframeAnswer(userMessage, rows);
       })(),
-      20000
+      25000
     );
-
     console.log('4. answer:', answer);
     await postToSlack(responseUrl, answer);
     console.log('5. posted');
@@ -144,8 +127,26 @@ if (req.body.command === '/portfolio') {
     console.error('Error:', error);
     await postToSlack(responseUrl, 'Sorry, something went wrong. Please try again.');
   }
-  return;
 }
+
+
+
+
+app.post("/slack/commands", async (req, res) => {
+  if (req.body.command === '/assisstant') {
+    res.status(200).send(`Hello! This is Jimmy. How can I assist you with you ?`);
+  }
+
+
+  if (req.body.command === '/portfolio') {
+    // Keep the function alive after the response is sent
+    waitUntil(handlePortfolio(req.body.text, req.body.response_url));
+
+    res.status(200).send(); // ack Slack immediately
+    console.log('1. ack sent');
+    return;
+  }
+
 
   if (req.body.command === '/websearch') {
     const userMessage = req.body.text;

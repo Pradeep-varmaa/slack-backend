@@ -44,68 +44,39 @@ app.post("/slack/events", async (req, res) => {
       });
     }
 
-    // Keep a TTL-based Set or Map to prevent memory leaks
-    const processedEvents = new Set();
-    const markEventProcessed = (eventId) => {
-      processedEvents.add(eventId);
-      setTimeout(() => processedEvents.delete(eventId), 5 * 60 * 1000); // 5-minute TTL
-    };
-
     if (type === "event_callback") {
+
+      console.log("Received Slack event:", req.body.event);
+
       const { event, event_id } = req.body;
-
-      // 1. Deduplicate events (Slack retries requests if not answered quickly)
       if (processedEvents.has(event_id)) {
-        return res.sendStatus(200);
-      }
-      markEventProcessed(event_id);
-
-      // 2. Ignore bot messages, message updates, or non-message events
-      if (event.type !== "message" || event.bot_id || event.subtype) {
+        console.log("Duplicate event ignored:", event_id);
         return res.sendStatus(200);
       }
 
-      // 3. Immediately acknowledge Slack within 3 seconds to prevent retries
+      processedEvents.add(event_id);
+
+      if (event.type !== "message" || event.bot_id) {
+        return res.sendStatus(200);
+      }
+
       res.sendStatus(200);
 
-      // 4. Process AI response asynchronously
-      (async () => {
+      try {
+
+        const userMessage = event.text;
         const channelId = event.channel;
-        const threadTs = event.thread_ts || event.ts;
-        let placeholderTs = null;
 
-        try {
-          // Step A: Immediately send a lightweight placeholder response (< 200ms)
-          const placeholder = await slack.chat.postMessage({
-            channel: channelId,
-            thread_ts: threadTs,
-            text: "⏳ _Thinking..._",
-          });
-          placeholderTs = placeholder.ts;
+        const aianswer = await GenerateAiAnswers(userMessage);
 
-          // Step B: Generate AI Answer (parallel / background)
-          const aianswer = await GenerateAiAnswers(event.text);
+        await slack.chat.postMessage({
+          channel: channelId,
+          text: aianswer,
+        });
 
-          // Step C: Update the placeholder message with the final response
-          await slack.chat.update({
-            channel: channelId,
-            ts: placeholderTs,
-            text: aianswer,
-          });
-
-        } catch (error) {
-          console.error("Error processing Slack message:", error);
-
-          // Update placeholder with a friendly error if it failed
-          if (placeholderTs) {
-            await slack.chat.update({
-              channel: channelId,
-              ts: placeholderTs,
-              text: "⚠️ Sorry, I ran into an error generating a response.",
-            });
-          }
-        }
-      })();
+      } catch (error) {
+        console.error("Error processing Slack message:", error);
+      }
 
       return;
     }
@@ -144,13 +115,13 @@ app.post("/slack/commands", async (req, res) => {
     const jsondata = JSON.parse(result);
     console.log("Remainder extraction result:", typeof jsondata);
 
-    const insertResult = await InsertRemainderdata(task = jsondata.reminder_message, sent = jsondata.reminder_time);
+    const insertResult = await InsertRemainderdata(task=jsondata.reminder_message, sent=jsondata.reminder_time);
 
-    const converted_time = new Date(jsondata.reminder_time).toLocaleString('en-US', { timeZone: 'UTC' }, { hour12: true, hour: 'numeric', minute: 'numeric', day: 'numeric' });
-    if (insertResult) {
-      res.status(200).send(`Remainder was initiated successfully on ${converted_time}`);
+    const converted_time = new Date(jsondata.reminder_time).toLocaleString('en-US', { timeZone: 'UTC' },{hour12: true, hour: 'numeric', minute: 'numeric',  day: 'numeric'});
+    if(insertResult){
+    res.status(200).send(`Remainder was initiated successfully on ${converted_time}`);
     }
-    else {
+    else{
       res.status(500).send(`Something went wrong! Try again later.`);
     }
   }
@@ -175,7 +146,7 @@ app.get("/slack/checkremainders", async (req, res) => {
       console.error("Error while sending email for remainder id:", data.id, err);
     }
   }
-  res.status(200).send(`Remainders checked. Emails sent: ${mail_sent}`);
+    res.status(200).send(`Remainders checked. Emails sent: ${mail_sent}`);
 })
 
 

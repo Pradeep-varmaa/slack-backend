@@ -1,13 +1,17 @@
 const crypto = require("crypto");
 
 function verifySlackRequest(req, res, next) {
-  const signingSecret = process.env.SLACK_SIGNING_SECRET;
-
-  if (!signingSecret) {
-    return next();
-  }
-
   try {
+    const signingSecret = process.env.SLACK_SIGNING_SECRET;
+
+    if (!signingSecret) {
+      console.error("SLACK_SIGNING_SECRET is missing");
+
+      return res.status(500).json({
+        error: "Server configuration error",
+      });
+    }
+
     const timestamp = req.headers["x-slack-request-timestamp"];
     const slackSignature = req.headers["x-slack-signature"];
 
@@ -18,6 +22,7 @@ function verifySlackRequest(req, res, next) {
     }
 
     const currentTime = Math.floor(Date.now() / 1000);
+
     const requestAge = Math.abs(currentTime - Number(timestamp));
 
     if (requestAge > 60 * 5) {
@@ -27,6 +32,7 @@ function verifySlackRequest(req, res, next) {
     }
 
     const rawBody = req.rawBody || "";
+
     const basestring = `v0:${timestamp}:${rawBody}`;
 
     const calculatedSignature =
@@ -49,8 +55,10 @@ function verifySlackRequest(req, res, next) {
     }
 
     next();
+
   } catch (error) {
     console.error("Slack verification error:", error);
+
     return res.status(401).json({
       error: "Invalid Slack request",
     });

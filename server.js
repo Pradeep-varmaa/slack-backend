@@ -9,6 +9,7 @@ const GenerateAiAnswers = require('./functions/generateaianswers');
 const ExtractRemainderdetails = require('./functions/remainderbot');
 const { GetRemaindersData, InsertRemainderdata, UpdateRemainderstatus } = require('./functions/remainderdbfunctions');
 const { sendEmail } = require('./lib/sentmail')
+const ReframeAnswer = require('./functions/frameanswer');
 
 const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
@@ -26,6 +27,28 @@ app.use(
     },
   })
 );
+
+const withTimeout = (promise, ms = 20000) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Timed out')), ms)),
+  ]);
+
+async function postToSlack(responseUrl, text) {
+  try {
+    const r = await fetch(responseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        response_type: 'in_channel',
+        text,
+      }),
+    });
+    console.log('Slack response_url reply:', r.status);
+  } catch (err) {
+    console.error('postToSlack error:', err);
+  }
+}
 
 app.get("/", (req, res) => {
   res.send("Welcome to the Slack Backend Server!");
@@ -93,14 +116,40 @@ app.post("/slack/commands", async (req, res) => {
 
   if (req.body.command === '/portfolio') {
     const userMessage = req.body.text;
+    const responseUrl = req.body.response_url;
+
+    // Acknowledge immediately to avoid Slack timeout
+    res.status(200).send();
+    console.log('1. /portfolio ack sent');
+
     try {
-      const result = await understandQuery(userMessage);
-      res.status(200).send(`Intent: ${result.intent}, Period: ${result.period}`);
+      const answer = await withTimeout(
+        (async () => {
+          const result = await understandQuery(userMessage);
+          console.log('2. SQL converter result:', result);
+
+          if (!result || result.success === false) {
+            return result && result.message
+              ? result.message
+              : 'Could not understand that query for portfolio data.';
+          }
+
+          const rows = await portfoliocount(result);
+          console.log('3. DB rows:', rows);
+
+          return await ReframeAnswer(userMessage, rows);
+        })(),
+        20000
+      );
+
+      console.log('4. Reframed answer:', answer);
+      await postToSlack(responseUrl, answer);
+      console.log('5. Posted to Slack');
+    } catch (error) {
+      console.error('Error in /portfolio handler:', error);
+      await postToSlack(responseUrl, 'Sorry, something went wrong while processing your portfolio query.');
     }
-    catch (error) {
-      console.error("Error understanding query:", error);
-      res.status(500).send("Error processing your request.");
-    }
+    return;
   }
 
   if (req.body.command === '/websearch') {

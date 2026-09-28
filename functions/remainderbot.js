@@ -589,11 +589,8 @@ ${userMessage}
         // ============================================
 
         const completion = await groq.chat.completions.create({
-
-            model: "llama-3.3-70b-versatile",
-
+            model: process.env.GROQ_MODEL || "openai/gpt-oss-20b",
             temperature: 0,
-
             messages: [
                 {
                     role: "system",
@@ -610,29 +607,24 @@ ${userMessage}
         // GET AI RESPONSE
         // ============================================
 
-        const result =
-            completion.choices[0].message.content.trim();
+        let result = completion.choices[0].message.content.trim();
 
-        console.log("Reminder extraction result:");
-        console.log(result);
+        console.log("Reminder extraction raw result:", result);
+
+        // Strip markdown code fences if present (```json ... ``` or ``` ... ```)
+        if (result.startsWith("```")) {
+            result = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+        }
 
         // ============================================
         // VALIDATE JSON
         // ============================================
 
         try {
-
             const parsedResult = JSON.parse(result);
-
             return JSON.stringify(parsedResult);
-
         } catch (jsonError) {
-
-            console.error(
-                "Invalid JSON returned by AI:",
-                result
-            );
-
+            console.error("Invalid JSON returned by AI:", result);
             return JSON.stringify({
                 is_reminder: false,
                 reminder_message: null,
@@ -642,12 +634,7 @@ ${userMessage}
         }
 
     } catch (err) {
-
-        console.error(
-            "Error extracting reminder details:",
-            err
-        );
-
+        console.error("Error extracting reminder details:", err);
         return JSON.stringify({
             is_reminder: false,
             reminder_message: null,

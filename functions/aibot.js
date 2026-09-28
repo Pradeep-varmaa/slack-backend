@@ -223,23 +223,32 @@ The JSON format should be:
 };
 
 async function understandQuery(userMessage) {
-  const completion = await groq.chat.completions.create({
-    model: "openai/gpt-oss-20b",
-
-    messages: [
+  try {
+    const completion = await groq.chat.completions.create({
+      model: process.env.GROQ_MODEL || "openai/gpt-oss-20b",
+      messages: [
         systemPrompt,
-      {
-        role: "user",
-        content: userMessage,
-      },
-    ],
+        {
+          role: "user",
+          content: userMessage,
+        },
+      ],
+      temperature: 0,
+    });
 
-    temperature: 0,
-  });
+    let text = completion.choices[0].message.content.trim();
+    if (text.startsWith("```")) {
+      text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    }
 
-  const text = completion.choices[0].message.content;
-
-  return JSON.parse(text);
+    return JSON.parse(text);
+  } catch (error) {
+    console.error("Error understanding query:", error);
+    return {
+      success: false,
+      message: "Could not understand your portfolio query. Please try phrasing it differently."
+    };
+  }
 }
 
 module.exports = {

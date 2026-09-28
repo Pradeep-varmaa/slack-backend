@@ -7,7 +7,7 @@ const groq = new Groq({
 async function GenerateAiAnswers(userMessage) {
     try {
         const completion = await groq.chat.completions.create({
-            model: process.env.GROQ_MODEL || "openai/gpt-oss-20b",
+            model: "openai/gpt-oss-20b",
             temperature: 0.2,
 
             messages: [

@@ -19,6 +19,15 @@ const ReframeAnswer = require('./functions/frameanswer');
 
 const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
+// Cache bot user info on startup
+let botUserId = null;
+slack.auth.test().then(auth => {
+  botUserId = auth.user_id;
+  console.log(`Slack Bot authenticated as user: ${auth.user} (${auth.user_id}), bot: ${auth.bot_id}`);
+}).catch(err => {
+  console.error('Slack auth check failed:', err.message);
+});
+
 // In-memory set for deduplicating Slack event callbacks with TTL cleanup
 const processedEvents = new Map();
 setInterval(() => {
@@ -42,25 +51,42 @@ app.use(
   })
 );
 
-// Helper to post messages back to Slack via response_url
-async function postToSlack(responseUrl, text, responseType = 'in_channel') {
-  if (!responseUrl) {
-    console.warn('postToSlack: No response_url provided.');
-    return;
+// Helper to post messages back to Slack (via response_url or fallback chat.postMessage)
+async function postToSlack(responseUrl, text, responseType = 'in_channel', channelId = null) {
+  let posted = false;
+
+  if (responseUrl) {
+    try {
+      const res = await fetch(responseUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          response_type: responseType,
+          text: text,
+        }),
+      });
+      console.log(`Slack response_url (${responseUrl.slice(0, 35)}...) returned HTTP: ${res.status}`);
+      if (res.ok) posted = true;
+    } catch (err) {
+      console.error('postToSlack fetch error:', err);
+    }
   }
-  try {
-    const res = await fetch(responseUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        response_type: responseType,
-        text,
-      }),
-    });
-    console.log(`Slack response_url status: ${res.status}`);
-  } catch (err) {
-    console.error('postToSlack error:', err);
+
+  // Fallback direct post via WebClient if response_url was not successful or missing
+  if (!posted && channelId && process.env.SLACK_BOT_TOKEN) {
+    try {
+      const directRes = await slack.chat.postMessage({
+        channel: channelId,
+        text: text,
+      });
+      console.log(`Direct slack.chat.postMessage to channel ${channelId}: ok=${directRes.ok}, ts=${directRes.ts}`);
+      posted = true;
+    } catch (slackErr) {
+      console.error('slack.chat.postMessage fallback error:', slackErr);
+    }
   }
+
+  return posted;
 }
 
 // Timeout helper for long-running async tasks
@@ -97,6 +123,7 @@ app.post('/slack/events', async (req, res) => {
 
     // 1. Slack URL Verification Challenge
     if (type === 'url_verification') {
+      console.log('Received url_verification challenge');
       return res.status(200).json({ challenge });
     }
 
@@ -108,14 +135,18 @@ app.post('/slack/events', async (req, res) => {
       }
       processedEvents.set(event_id, Date.now());
 
-      // Ignore bot messages to prevent infinite loops
-      if (event.bot_id || event.subtype === 'bot_message') {
+      // Ignore bot messages, message updates/deletions, or self messages
+      if (
+        event.bot_id ||
+        event.subtype ||
+        (botUserId && event.user === botUserId)
+      ) {
         return res.sendStatus(200);
       }
 
       // Handle message or app_mention events
       if (event.type === 'message' || event.type === 'app_mention') {
-        // Acknowledge receipt immediately to avoid Slack retries
+        // Acknowledge receipt immediately to avoid Slack retrying the event
         res.sendStatus(200);
 
         // Process event asynchronously
@@ -125,33 +156,35 @@ app.post('/slack/events', async (req, res) => {
             // Remove bot user mention (<@U...>)
             const userMessage = rawText.replace(/<@[A-Z0-9]+>/g, '').trim();
             const channelId = event.channel;
-            const threadTs = event.thread_ts || event.ts;
+
+            console.log(`Incoming Slack event (${event.type}) in channel ${channelId} from user ${event.user}: "${userMessage}"`);
+
+            let replyText = '';
 
             if (!userMessage) {
-              await slack.chat.postMessage({
-                channel: channelId,
-                thread_ts: threadTs,
-                text: "👋 Hello! How can I help you today? You can ask questions, check portfolio analytics, search information, or set reminders!",
-              });
-              return;
+              replyText = "👋 Hello! How can I help you today? You can ask questions, check portfolio visitor analytics, search topics, or set reminders!";
+            } else {
+              replyText = await GenerateAiAnswers(userMessage);
             }
 
-            console.log(`Processing Slack message event in channel ${channelId}: "${userMessage}"`);
-
-            // Generate AI response
-            const aianswer = await GenerateAiAnswers(userMessage);
-
-            await slack.chat.postMessage({
+            // Post response directly to the channel so it appears in the main feed
+            // (Only set thread_ts if the incoming message was already inside an existing thread)
+            const postPayload = {
               channel: channelId,
-              thread_ts: threadTs,
-              text: aianswer,
-            });
+              text: replyText,
+            };
+
+            if (event.thread_ts) {
+              postPayload.thread_ts = event.thread_ts;
+            }
+
+            const slackRes = await slack.chat.postMessage(postPayload);
+            console.log(`✔ Message posted to Slack channel ${channelId}: ok=${slackRes.ok}, ts=${slackRes.ts}`);
           } catch (error) {
             console.error('Error processing Slack event message:', error);
             try {
               await slack.chat.postMessage({
                 channel: event.channel,
-                thread_ts: event.thread_ts || event.ts,
                 text: "⚠️ Sorry, I encountered an error while processing your request. Please try again.",
               });
             } catch (postErr) {
@@ -179,9 +212,9 @@ app.post('/slack/commands', async (req, res) => {
   const { command, text = '', response_url, user_id, channel_id, user_name } = req.body;
   const userMessage = (text || '').trim();
 
-  console.log(`Received command: ${command} from user: ${user_name || user_id} with text: "${userMessage}"`);
+  console.log(`Received command: ${command} in channel: ${channel_id} from: ${user_name || user_id} with text: "${userMessage}"`);
 
-  // Acknowledge immediately to avoid Slack's 3-second timeout
+  // Acknowledge immediately to prevent Slack's 3-second timeout
   res.status(200).send();
 
   // Route commands asynchronously
@@ -191,16 +224,16 @@ app.post('/slack/commands', async (req, res) => {
       (async () => {
         try {
           if (!userMessage) {
-            const welcomeText = `👋 *Hello <@${user_id}>! I'm Jimmy, your AI Assistant.*\n\nHere are some things I can do for you:\n• \`/portfolio <question>\` — Get visitor metrics and analytics\n• \`/websearch <query>\` — Ask any question or search information\n• \`/remainder <task> <time>\` — Schedule email and Slack reminders\n• \`/assistant <question>\` — Chat with me directly`;
-            await postToSlack(response_url, welcomeText, 'ephemeral');
+            const welcomeText = `👋 *Hello <@${user_id}>! I'm Jimmy, your AI Assistant.*\n\nHere is what I can do for you:\n• \`/portfolio <question>\` — Get visitor metrics and analytics\n• \`/websearch <query>\` — Ask any question or search information\n• \`/remainder <task> <time>\` — Schedule email and Slack reminders\n• \`/assistant <question>\` — Chat with me directly`;
+            await postToSlack(response_url, welcomeText, 'in_channel', channel_id);
             return;
           }
 
           const answer = await withTimeout(GenerateAiAnswers(userMessage));
-          await postToSlack(response_url, answer);
+          await postToSlack(response_url, answer, 'in_channel', channel_id);
         } catch (error) {
           console.error('Error handling /assistant command:', error);
-          await postToSlack(response_url, '⚠️ Sorry, I could not process your request right now.');
+          await postToSlack(response_url, '⚠️ Sorry, I could not process your request right now.', 'in_channel', channel_id);
         }
       })();
       return;
@@ -229,10 +262,10 @@ app.post('/slack/commands', async (req, res) => {
             })()
           );
 
-          await postToSlack(response_url, answer);
+          await postToSlack(response_url, answer, 'in_channel', channel_id);
         } catch (error) {
           console.error('Error handling /portfolio command:', error);
-          await postToSlack(response_url, '⚠️ Sorry, something went wrong while fetching portfolio analytics.');
+          await postToSlack(response_url, '⚠️ Sorry, something went wrong while fetching portfolio analytics.', 'in_channel', channel_id);
         }
       })();
       return;
@@ -246,16 +279,17 @@ app.post('/slack/commands', async (req, res) => {
             await postToSlack(
               response_url,
               '🔍 Please provide a question or topic to search. Example: `/websearch What is Docker and how does it work?`',
-              'ephemeral'
+              'in_channel',
+              channel_id
             );
             return;
           }
 
           const aianswer = await withTimeout(GenerateAiAnswers(userMessage));
-          await postToSlack(response_url, aianswer);
+          await postToSlack(response_url, aianswer, 'in_channel', channel_id);
         } catch (error) {
           console.error('Error handling /websearch command:', error);
-          await postToSlack(response_url, '⚠️ Sorry, I could not complete the search. Please try again.');
+          await postToSlack(response_url, '⚠️ Sorry, I could not complete the search. Please try again.', 'in_channel', channel_id);
         }
       })();
       return;
@@ -269,7 +303,8 @@ app.post('/slack/commands', async (req, res) => {
             await postToSlack(
               response_url,
               '⏰ *How to use reminders:*\n`/remainder Remind me tomorrow at 10 AM to call John`\n`/remainder Remind me in 30 minutes to check deployment`',
-              'ephemeral'
+              'in_channel',
+              channel_id
             );
             return;
           }
@@ -283,7 +318,8 @@ app.post('/slack/commands', async (req, res) => {
             await postToSlack(
               response_url,
               '⚠️ I could not understand the reminder details. Please include both what to do and when (e.g., `/remainder Remind me tomorrow at 5 PM to submit report`).',
-              'ephemeral'
+              'in_channel',
+              channel_id
             );
             return;
           }
@@ -303,10 +339,10 @@ app.post('/slack/commands', async (req, res) => {
           });
 
           const confirmationMessage = `🔔 *Reminder Scheduled!*\n• *Task:* ${jsondata.reminder_message}\n• *When:* ${formattedTime} (IST)\n• *Created by:* <@${user_id}>`;
-          await postToSlack(response_url, confirmationMessage);
+          await postToSlack(response_url, confirmationMessage, 'in_channel', channel_id);
         } catch (error) {
           console.error('Error handling /remainder command:', error);
-          await postToSlack(response_url, '⚠️ Something went wrong setting the reminder. Please try again later.');
+          await postToSlack(response_url, '⚠️ Something went wrong setting the reminder. Please try again later.', 'in_channel', channel_id);
         }
       })();
       return;
@@ -316,7 +352,8 @@ app.post('/slack/commands', async (req, res) => {
     await postToSlack(
       response_url,
       `❓ Unrecognized command \`${command}\`. Available commands are: \`/assistant\`, \`/portfolio\`, \`/websearch\`, and \`/remainder\`.`,
-      'ephemeral'
+      'in_channel',
+      channel_id
     );
   } catch (err) {
     console.error('Top-level command handler error:', err);

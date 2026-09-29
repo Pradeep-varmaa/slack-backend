@@ -12,6 +12,7 @@ const { sendEmail } = require('./lib/sentmail')
 const { PortfolioCount } = require('./functions/portfoliocount');
 const { FrameHumanAnswer } = require('./functions/frameanswer')
 const { waitUntil } = require('@vercel/functions');
+const {Prompt} = require('./functions/prompt');
 
 const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
@@ -165,6 +166,17 @@ app.post("/slack/commands", async (req, res) => {
     const aianswer = await GenerateAiAnswers(userMessage);
     res.status(200).send(aianswer);
   }
+
+  if (req.body.command === '/prompt') {
+
+    console.log("Request", req);
+    
+    const userMessage = req.body.text;
+
+    const aianswer = await Prompt(userMessage);
+    res.status(200).send(aianswer);
+  }
+
   if (req.body.command === '/remainder') {
     const userMessage = req.body.text;
     const result = await ExtractRemainderdetails(userMessage);
